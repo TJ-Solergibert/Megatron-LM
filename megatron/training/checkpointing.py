@@ -422,6 +422,7 @@ def save_checkpoint(iteration, model, optimizer, opt_param_scheduler, num_floati
         )
 
         state_dict['num_floating_point_operations_so_far'] = num_floating_point_operations_so_far
+        state_dict['tokens_so_far'] = args.consumed_train_samples * args.seq_length
         if ckpt_type == CheckpointType.GLOBAL and ckpt_format == "torch_dist":
             if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
                 # TODO Handle non-empty directories (e.g., after a crash during saving).
@@ -1274,8 +1275,8 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
             ckpt_tp_pp == run_tp_pp
             and not release
             and not args.finetune
-            and 'rerun_state_machine' in state_dict
         ):
+            # NOTE(tj.solergibert) and 'rerun_state_machine' in state_dict
             rerun_state_machine = get_rerun_state_machine()
             gen_sd_rerun_state = rerun_state_machine.state_dict(
                 data_iterator=None, ckpt_format=ckpt_format,
@@ -1332,8 +1333,8 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
 
     # Checkpoint not loaded.
     if state_dict is None:
-        # Iteration and num_floating_point_operations_so_far default to 0.
-        return 0, 0
+        # Iteration, num_floating_point_operations_so_far and tokens_so_far default to 0.
+        return 0, 0, 0
 
     # Set checkpoint version.
     set_checkpoint_version(state_dict.get('checkpoint_version', 0))
@@ -1357,6 +1358,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
                              'iteration from checkpoint {}, exiting'.format(checkpoint_name))
                 sys.exit()
     num_floating_point_operations_so_far = state_dict.get('num_floating_point_operations_so_far', 0)
+    tokens_so_far = state_dict.get('tokens_so_far', 0)
 
     # Check arguments.
     assert args.consumed_train_samples == 0
@@ -1377,6 +1379,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
 
     # Model.
     strict = False if args.retro_add_retriever else strict
+    # TODO(tj.solergibert) strict = False to swipe TENorm
     if not skip_load_to_model_and_opt:
         if len(ddp_model) == 1:
             ddp_model[0].load_state_dict(state_dict['model'], strict=strict)
@@ -1494,7 +1497,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, load_arg='load', 
         is_local_chkpt = (ckpt_type == CheckpointType.LOCAL)
         ft_integration.on_checkpoint_loaded(is_local_chkpt=is_local_chkpt)
 
-    return iteration, num_floating_point_operations_so_far
+    return iteration, num_floating_point_operations_so_far, tokens_so_far
 
 
 def _to_dtensor(wrapped_model, model_state_dict):

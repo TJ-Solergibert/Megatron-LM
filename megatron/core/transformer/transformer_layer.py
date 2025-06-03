@@ -28,6 +28,8 @@ from megatron.core.utils import (
     make_viewless_tensor,
 )
 
+from apertus.megatron.apertus_mlp import ApertusMLP
+
 logger = logging.getLogger(__name__)
 
 
@@ -363,7 +365,7 @@ class TransformerLayer(MegatronModule, BaseTransformerLayer):
         if isinstance(submodules.mlp, ModuleSpec):
             if submodules.mlp.module in (MoELayer, GroupedMLP, TEGroupedMLP, SequentialMLP):
                 additional_mlp_kwargs["model_comm_pgs"] = model_comm_pgs
-            elif submodules.mlp.module == MLP:
+            elif submodules.mlp.module in (MLP, ApertusMLP):
                 assert hasattr(
                     model_comm_pgs, 'tp'
                 ), 'TP process group is required for MLP in TransformerLayer'
